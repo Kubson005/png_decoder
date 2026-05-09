@@ -48,6 +48,30 @@ class Decode:
             'interlace_method': inter,
         }
     
+    def parse_text(data):
+        """
+        parsuje dane chunku tEXt (tekstowy)
+        """
+        null_pos = data.find(b'\x00')
+        if null_pos == -1:
+            return "Invalid tEXt chunk"
+        key = data[:null_pos].decode('latin-1')
+        value = data[null_pos+1:].decode('latin-1')
+        return f"Klucz: {key}, Wartość: {value}"
+    
+    def parse_time(data):
+        """
+        parsuje dane chunku tIME (czas modyfikacji)
+        """
+        year, month, day, hour, minute, second = struct.unpack('>HBBBBB', data)
+        return f"Czas modyfikacji: {year}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
+    
+    def parse_exif(data):
+        """
+        parsuje dane chunku eXIf (EXIF)
+        """
+        return f"EXIF dane (hex): {binascii.hexlify(data[:100]).decode('ascii')}..." if len(data) > 100 else f"EXIF dane (hex): {binascii.hexlify(data).decode('ascii')}"
+    
     def fourier(photo):
         transform = fft2(photo)
         transform_shifted = fftshift(transform)
@@ -56,12 +80,12 @@ class Decode:
         
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
         
-        # Wykres modułu (z logarytmiczną skalą dla lepszej widoczności)
+        # wykres modulu
         ax1.imshow(np.log(1 + magnitude), cmap='gray')
         ax1.set_title('Moduł transformacji Fouriera')
         ax1.axis('off')
         
-        # Wykres fazy
+        # wykres fazy
         ax2.imshow(phase, cmap='gray')
         ax2.set_title('Faza transformacji Fouriera')
         ax2.axis('off')
@@ -79,25 +103,25 @@ class Decode:
         reconstructed = ifft2(transform_unshifted).real
         
         # obliczenie bledu
-        error = np.mean(photo_float - reconstructed)
+        error = np.abs(photo_float - reconstructed)
         max_error = np.max(np.abs(photo_float - reconstructed))
         
-        print("\nTest poprawnosci transformacji Fouriera:")
-        print(f"  Blad: {error}")
-        print(f"  Maksymalny blad bezwzgledny: {max_error}")
+        print("\ntest poprawnosci transformacji Fouriera:")
+        print(f"  blad: {error}")
+        print(f"  maksymalny blad bezwzgledny: {max_error}")
         
    
-        if error < 1e-9 and max_error < 1e-9:
-            print("  ✓ Transformacja jest poprawna (błędy w granicach tolerancji numerycznej).")
+        if np.all(error < 1e-9) and max_error < 1e-9:
+            print("transformacja jest poprawna")
         else:
-            print("  ✗ Wykryto błąd w transformacji (błędy przekraczają tolerancję).")
+            print("wykryto błąd w transformacji")
         
         # wyświetlenie różnicy jeśli błąd jest duży
-        if error > 1e-9:
+        if np.any(error > 1e-9):
             diff = np.abs(photo_float - reconstructed)
             plt.figure(figsize=(8, 6))
             plt.imshow(diff, cmap='hot')
-            plt.title('Różnica między oryginałem a odtworzonym obrazem')
+            plt.title('rożnica między oryginałem a odtworzonym obrazem')
             plt.colorbar()
             plt.axis('off')
             plt.show()
@@ -116,7 +140,7 @@ def anonymize_png(input_path, output_path):
     input_path = Path(input_path)
     output_path = Path(output_path)
 
-    metadata_chunks = {b'tEXt', b'zTXt', b'iTXt', b'tIME', b'eXIf'}
+    critical_chunks = {b'IHDR', b'PLTE', b'IDAT', b'IEND'}
     removed = []
 
     with input_path.open('rb') as fin, output_path.open('wb') as fout:
@@ -130,7 +154,7 @@ def anonymize_png(input_path, output_path):
         while True:
             ctype, data, length, crc = Decode.read_chunk(fin)
 
-            if ctype in metadata_chunks:
+            if ctype not in critical_chunks:
                 removed.append(ctype.decode('ascii'))
             else:
                 write_png_chunk(fout, ctype, data)
@@ -138,7 +162,6 @@ def anonymize_png(input_path, output_path):
             if ctype == b'IEND':
                 break
 
-    print(f'utworzono zanonimizowany PNG: {output_path}')
     print(f'usuniete chunki: {removed if removed else "brak"}')
     return output_path
 
@@ -161,25 +184,60 @@ def main():
         print(f'blad ladowania obrazu: {e}')
         return
     
+    # wyswietlanie obraz
+    plt.figure(figsize=(8, 6))
+    plt.imshow(photo, cmap='gray')
+    plt.title('Obraz PNG')
+    plt.axis('off')
+    plt.show()
+    
     file = import_photo(png_path)
+    if not file:
+        return
 
-    ctype, data, length, crc = Decode.read_chunk(file)
-    print('read_chunk result:')
-    print(f'  type: {ctype}')
-    print(f'  length: {length}')
-    print(f'  crc: {crc}')
+    chunks = []
+    while True:
+        ctype, data, length, crc = Decode.read_chunk(file)
+        chunks.append((ctype, data, length, crc))
+        if ctype == b'IEND':
+            break
+    
+    file.close()
+    
+    # wyswietlanie informacji o chunkach
+    print("informacje o chunkach:")
+    ancillary_displayed = 0
+    for ctype, data, length, crc in chunks:
+        ctype_str = ctype.decode('ascii')
+        print(f"\nChunk: {ctype_str}, Długość: {length}")
+        
+        if ctype == b'IHDR':
+            ihdr_info = Decode.parse_ihdr(data)
+            print("  Atrybuty IHDR:")
+            for key, value in ihdr_info.items():
+                print(f"    {key}: {value}")
+        elif ctype == b'PLTE':
+            print(f"  Critical chunk PLTE: surowe bajty (hex): {binascii.hexlify(data[:100]).decode('ascii')}..." if len(data) > 100 else f"  Critical chunk PLTE: surowe bajty (hex): {binascii.hexlify(data).decode('ascii')}")
+        elif ctype in {b'IDAT', b'IEND'}:
+            print(f"  Critical chunk {ctype_str}: dane binarne, długość {length}")
+        elif ctype == b'tEXt' and ancillary_displayed < 3:
+            print(f"  Ancillary chunk tEXt: {Decode.parse_text(data)}")
+            ancillary_displayed += 1
+        elif ctype == b'tIME' and ancillary_displayed < 3:
+            print(f"  Ancillary chunk tIME: {Decode.parse_time(data)}")
+            ancillary_displayed += 1
+        elif ctype == b'eXIf' and ancillary_displayed < 3:
+            print(f"  Ancillary chunk eXIf: {Decode.parse_exif(data)}")
+            ancillary_displayed += 1
+        else:
+            if ctype_str[0].islower():  # ancillary
+                print(f"  Ancillary chunk {ctype_str}: dane binarne, długość {length}")
+    
+    # transformacja Fouriera
+    Decode.fourier(photo)
+    Decode.test_fourier(photo)
 
-    if ctype == b'IHDR':
-        ihdr_info = Decode.parse_ihdr(data)
-        print('\nparse_ihdr result:')
-        for key, value in ihdr_info.items():
-            print(f'  {key}: {value}')
-    else:
-        print('pierwszy chunk nie jest IHDR, a:', ctype)
-
-    # Decode.fourier(photo)
-    # Decode.test_fourier(photo)
-
+    # anonimizacja
     anonymize_png("shark.png", "anonimized.png")
 
 if __name__ == '__main__':
