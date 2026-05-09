@@ -4,9 +4,9 @@ from scipy.fft import fft2, fftshift, ifft2, ifftshift
 import numpy as np
 import matplotlib.pyplot as plt
 from PIL import Image
+import binascii
 
 class Decode:
-
     def read_chunk(f):
         """
         odczytuje pojedynczy chunk z pliku PNG
@@ -102,6 +102,46 @@ class Decode:
             plt.axis('off')
             plt.show()
 
+def write_png_chunk(f, ctype, data):
+    """
+    zapisuje chunk PNG i wylicza dla niego poprawny CRC
+    """
+    f.write(struct.pack('>I', len(data)))
+    f.write(ctype)
+    f.write(data)
+    crc = binascii.crc32(ctype + data) & 0xffffffff
+    f.write(struct.pack('>I', crc))
+
+def anonymize_png(input_path, output_path):
+    input_path = Path(input_path)
+    output_path = Path(output_path)
+
+    metadata_chunks = {b'tEXt', b'zTXt', b'iTXt', b'tIME', b'eXIf'}
+    removed = []
+
+    with input_path.open('rb') as fin, output_path.open('wb') as fout:
+        signature = fin.read(8)
+        if signature != b'\x89PNG\r\n\x1a\n':
+            print('niepoprawny format PNG')
+            return None
+
+        fout.write(signature)
+
+        while True:
+            ctype, data, length, crc = Decode.read_chunk(fin)
+
+            if ctype in metadata_chunks:
+                removed.append(ctype.decode('ascii'))
+            else:
+                write_png_chunk(fout, ctype, data)
+
+            if ctype == b'IEND':
+                break
+
+    print(f'utworzono zanonimizowany PNG: {output_path}')
+    print(f'usuniete chunki: {removed if removed else "brak"}')
+    return output_path
+
 def import_photo(path):
     f = path.open('rb')
     signature = f.read(8)
@@ -137,8 +177,10 @@ def main():
     else:
         print('pierwszy chunk nie jest IHDR, a:', ctype)
 
-    Decode.fourier(photo)
-    Decode.test_fourier(photo)
+    # Decode.fourier(photo)
+    # Decode.test_fourier(photo)
+
+    anonymize_png("shark.png", "anonimized.png")
 
 if __name__ == '__main__':
     main()
