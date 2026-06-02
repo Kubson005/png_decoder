@@ -104,8 +104,8 @@ class Decode:
 
     @staticmethod
     def fourier(photo):
-        transform = fftshift(fft2(photo.astype(float)))
-        magnitude = np.log1p(np.abs(transform))
+        transform = fftshift(fft2(photo))
+        magnitude = np.abs(transform)
         phase = np.angle(transform)
 
         _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
@@ -122,11 +122,10 @@ class Decode:
 
     @staticmethod
     def test_fourier(photo):
-        photo_float = photo.astype(float)
-        shifted = fftshift(fft2(photo_float))
+        shifted = fftshift(fft2(photo))
         reconstructed = ifft2(ifftshift(shifted)).real
 
-        error = np.abs(photo_float - reconstructed)
+        error = np.abs(photo - reconstructed)
         max_error = float(np.max(error))
         mean_error = float(np.mean(error))
 
@@ -292,19 +291,19 @@ def main():
 
     print(f"plik wejsciowy: {png_path}\n")
 
-    print_step(1, "Ręczne dekodowanie PNG (analiza kolejnych bajtow)")
+    print_step(1, "Dekodowanie PNG")
     print(f"  liczba odczytanych chunkow: {len(chunks)}")
     print("  kolejnosc chunkow:")
     for ctype, _, length, _ in chunks:
         print(f"    {ctype.decode('ascii')} (dlugosc={length})")
 
-    print_step(2, "Atrybuty pliku (rozmiar, glebia, probkowanie, itd.)")
+    print_step(2, "Atrybuty pliku (rozmiar, glebia, probkowanie)")
     print_file_attributes(png_path, chunks)
 
-    print_step(3, "Obowiazkowe segmenty (critical) - pelna zawartosc")
+    print_step(3, "Obowiazkowe segmenty (critical)")
     print_critical_chunks(chunks)
 
-    print_step(4, "Wybrane segmenty dodatkowe (ancillary, min. 3 typy)")
+    print_step(4, "Wybrane segmenty dodatkowe (ancillary)")
     print_selected_ancillary(chunks)
 
     print_step(5, "Prezentacja obrazu")
@@ -314,13 +313,13 @@ def main():
     plt.axis("off")
     plt.show()
 
-    print_step(6, "Widmo Fouriera (modul i faza)")
+    print_step(6, "Transformata Fouriera (modul i faza)")
     Decode.fourier(photo)
 
-    print_step(7, "Sposob testowania poprawnosci transformacji Fouriera")
+    print_step(7, "Testowanie poprawnosci transformacji Fouriera")
     Decode.test_fourier(photo)
 
-    print_step(8, "Anonimizacja bez ingerencji w obraz")
+    print_step(8, "Anonimizacja")
     print(f"  dane po IEND w wejsciu: {len(trailing)} bajtow")
     anonymize_png(png_path, output_path)
 
@@ -329,13 +328,6 @@ def main():
     except Exception as error:
         print(f"blad weryfikacji anonimizacji: {error}")
         return
-
-    out_ancillary = [c.decode("ascii") for c, _, _, _ in out_chunks if is_ancillary(c)]
-    out_critical = [c.decode("ascii") for c, _, _, _ in out_chunks if c in CRITICAL_CHUNKS]
-    print("  weryfikacja pliku po anonimizacji:")
-    print(f"    critical pozostaly: {out_critical}")
-    print(f"    ancillary pozostale: {out_ancillary if out_ancillary else 'brak'}")
-    print(f"    dane po IEND: {len(out_trailing)} bajtow")
 
 
 if __name__ == "__main__":
