@@ -1,0 +1,13 @@
+# srodowisko
+.venv/
+
+# cache Pythona
+__pycache__/
+*.pyc
+
+# ustawienia IDE
+.idea/
+.vscode/
+
+# pliki generowane
+anonimized.png
