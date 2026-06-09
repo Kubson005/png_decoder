@@ -38,7 +38,6 @@ class Decode:
         ctype = file_obj.read(4)
 
 
-
         # odczyt dokładnie tylu bajtów, ile mówi długość chunku
         data = file_obj.read(length)
 
@@ -62,7 +61,7 @@ class Decode:
         IHDR zawiera podstawowe metadane potrzebne do opisu pliku:
         rozmiar, głębię, typ koloru i parametry kodowania.
         """
-        # 13 bajtów IHDR: width, height i 5 pól po 1 bajcie
+        # 13 bajtów IHDR: width, height..
         w, h, depth, color_type, comp, filt, inter = struct.unpack(">IIBBBBB", data)
         return {
             "width": w,
@@ -79,7 +78,7 @@ class Decode:
         """
         chunk tIME (czas modyfikacji pliku)
         """
-        # tIME ma stały format: rok(2B) + miesiąc/dzień/godzina/minuta/sekunda.
+        # tIME: rok(2B) + miesiąc/dzień/godzina/minuta/sekunda.
         year, month, day, hour, minute, second = struct.unpack(">HBBBBB", data)
         return f"{year:04d}-{month:02d}-{day:02d} {hour:02d}:{minute:02d}:{second:02d}"
 
@@ -91,8 +90,8 @@ class Decode:
         # pHYs: 4B X, 4B Y, 1B jednostki
         px_x, px_y, unit = struct.unpack(">IIB", data)
         if unit == 1:
-            return f"X={px_x} px/m, Y={px_y} px/m (jednostka: metr)"
-        return f"X={px_x}, Y={px_y} (jednostka: nieokreslona)"
+            return f"X={px_x} px/m, Y={px_y} px/m "
+        return f"X={px_x}, Y={px_y} "
 
     @staticmethod
     def parse_gama(data):
@@ -147,12 +146,16 @@ class Decode:
         # moduł liczby zespolonej opisuje energię danej częstotliwości
         magnitude = np.abs(transform)
 
+        # skala logarytmiczna: skladowa DC w srodku jest o rzedy wielkosci
+        # wieksza od reszty, wiec w skali liniowej widmo to tylko jasna kropka.
+        magnitude_log = np.log1p(magnitude)
+
         # argument liczby zespolonej to faza widma
         phase = np.angle(transform)
 
         _, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 6))
-        ax1.imshow(magnitude, cmap="gray")
-        ax1.set_title("Modul transformacji Fouriera")
+        ax1.imshow(magnitude_log, cmap="gray")
+        ax1.set_title("Modul transformacji Fouriera (skala log)")
         ax1.axis("off")
 
         ax2.imshow(phase, cmap="gray")
@@ -205,10 +208,8 @@ def is_ancillary(ctype):
     return bool(ctype[0] & 0x20)
 
 SELECTED_ANCILLARY = {
-    b"tEXt": Decode.parse_text,
     b"tIME": Decode.parse_time,
-    b"cHRM": Decode.parse_chrm,
-    # b"eXIf": Decode.parse_exif,
+    b"eXIf": Decode.parse_exif,
     b"pHYs": Decode.parse_phys,
     b"gAMA": Decode.parse_gama,
 }
@@ -218,24 +219,20 @@ def chunk_data(chunks, chunk_type):
     # next(..., None) zwraca pierwszy pasujący element
     return next((data for ctype, data, _, _ in chunks if ctype == chunk_type), None)
 
-def print_step(number, title):
-    """wypisuje numerowany nagłówek etapu prezentacji"""
-    print(f"\n[{number}] {title}")
-
 def read_png(path):
     """
-    wczytuje PNG "ręcznie" i zwraca listę chunków + dane po IEND
+    wczytuje PNG  i zwraca listę chunków + dane po IEND
     """
-    # lista trójek chunków zachowuje dokładną kolejność z pliku
+    
     chunks = []
     with path.open("rb") as file_obj:
-        # każdy PNG musi zaczynać się od stałego 8-bajtowego podpisu.
+        # każdy PNG musi zaczynać się od magic number
         signature = file_obj.read(8)
         if signature != PNG_SIGNATURE:
             raise ValueError("niepoprawny format PNG")
 
         while True:
-            # iteracyjny odczyt "ręczny" każdego kolejnego chunku
+            # odczyt każdego kolejnego chunku
             chunk = Decode.read_chunk(file_obj)
             if chunk is None:
                 raise ValueError("brak chunku IEND")
@@ -288,7 +285,7 @@ def print_critical_chunks(chunks):
         print(f"  crc: 0x{crc:08x}")
         print(f"  dane hex (podglad): {shown_hex}")
         if len(shown_hex) != len(full_hex):
-            print(f"  uwaga: skrócono podglad (pelna dlugosc hex: {len(full_hex)} znakow)")
+            print(f" (pelna dlugosc hex: {len(full_hex)} znakow)")
         # dla IHDR dodajemy interpretację pól, nie tylko surowe bajty
         if ctype == b"IHDR":
             parsed = Decode.parse_ihdr(data)
@@ -367,18 +364,18 @@ def anonymize_png(input_path, output_path):
 
 
 def main():
-    png_path = Path("shark.png")
+    png_path = Path("earthrise.png")
     output_path = Path("anonimized.png")
 
     try:
-        # ręczny odczyt PNG i chunków
+        # odczyt PNG i chunków
         chunks, trailing = read_png(png_path)
     except Exception as error:
         print(f"blad odczytu PNG: {error}")
         return
 
     try:
-        # konwersja do skali szarości upraszcza analizę FFT do jednej macierzy intensywności
+        # konwersja do skali szarości upraszcza analizę FFT 
         image = Image.open(png_path).convert("L")
         # zamiana do numpy do obliczeń FFT
         photo = np.array(image)
@@ -386,25 +383,25 @@ def main():
         print(f"blad ladowania obrazu: {error}")
         return
 
-    print(f"plik wejsciowy: {png_path}\n")
+    print(f"\nplik wejsciowy: {png_path}\n")
 
-    print_step(1, "Ręczne dekodowanie PNG (analiza kolejnych bajtow)")
+    print("\n[1] Ręczne dekodowanie PNG")
     print(f"  liczba odczytanych chunkow: {len(chunks)}")
     print("  kolejnosc chunkow:")
     for ctype, _, length, _ in chunks:
-        # pokazujemy kolejność i długości chunków tak, jak w pliku
+        #kolejność i długości chunków 
         print(f"    {ctype.decode('ascii')} (dlugosc={length})")
 
-    print_step(2, "Atrybuty pliku (rozmiar, glebia, probkowanie, itd.)")
+    print("\n[2] Atrybuty pliku (rozmiar, glebia, probkowanie, itd.)")
     print_file_attributes(png_path, chunks)
 
-    print_step(3, "Obowiazkowe segmenty (critical) - pelna zawartosc")
+    print("\n[3] Obowiazkowe segmenty (critical) - pelna zawartosc")
     print_critical_chunks(chunks)
 
-    print_step(4, "Wybrane segmenty dodatkowe (ancillary, min. 3 typy)")
+    print("\n[4] Wybrane segmenty dodatkowe (ancillary, min. 3 typy)")
     print_selected_ancillary(chunks)
 
-    print_step(5, "Prezentacja obrazu")
+    print("\n[5] Prezentacja obrazu")
 
     plt.figure(figsize=(8, 6))
     plt.imshow(photo, cmap="gray")
@@ -412,22 +409,16 @@ def main():
     plt.axis("off")
     plt.show()
 
-    print_step(6, "Widmo Fouriera (modul i faza)")
+    print("\n[6] Widmo Fouriera (modul i faza)")
     Decode.fourier(photo)
 
-    print_step(7, "Sposob testowania poprawnosci transformacji Fouriera")
+    print("\n[7] Sposob testowania poprawnosci transformacji Fouriera")
     Decode.test_fourier(photo)
 
-    print_step(8, "Anonimizacja bez ingerencji w obraz")
+    print("\n[8] Anonimizacja bez ingerencji w obraz")
     print(f"  dane po IEND w wejsciu: {len(trailing)} bajtow")
 
     anonymize_png(png_path, output_path)
-
-    try:
-        out_chunks, out_trailing = read_png(output_path)
-    except Exception as error:
-        print(f"blad weryfikacji anonimizacji: {error}")
-        return
 
 if __name__ == "__main__":
     main()
